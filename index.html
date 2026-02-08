@@ -2,19 +2,33 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>The Neighbor's Shadow</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Guest's Shadow</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
-        #ui { position: absolute; top: 10px; left: 10px; color: white; pointer-events: none; }
-        #instructions { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; text-align: center; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', Courier, monospace; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #ff0000; pointer-events: none; text-shadow: 2px 2px #000; }
+        #overlay { 
+            position: absolute; width: 100%; height: 100%; 
+            background: rgba(0,0,0,0.8); color: white; 
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 10; cursor: pointer;
+        }
+        .battery-bar { width: 150px; height: 10px; border: 1px solid #fff; margin-top: 5px; }
+        #battery-fill { width: 100%; height: 100%; background: #0f0; transition: width 0.2s; }
     </style>
 </head>
 <body>
-    <div id="ui">
-        <h2>Day/Night: <span id="time-status">Day</span></h2>
-        <p>Flashlight: F | Move: WASD</p>
+    <div id="overlay">
+        <h1>THE NEIGHBOR IS WATCHING</h1>
+        <p>CLICK TO ENTER FULLSCREEN & START</p>
+        <p style="font-size: 0.8em;">WASD to Move | F for Flashlight | ESC to Quit</p>
     </div>
-    <div id="instructions"><h1>Click to Start</h1></div>
+
+    <div id="ui">
+        <h2 id="time-display">TIME: DAY</h2>
+        <div>FLASHLIGHT BATTERY</div>
+        <div class="battery-bar"><div id="battery-fill"></div></div>
+    </div>
 
     <script type="importmap">
         { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
@@ -23,7 +37,7 @@
     <script type="module">
         import * as THREE from 'three';
 
-        // --- Setup Scene ---
+        // --- Core Setup ---
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -31,99 +45,143 @@
         document.body.appendChild(renderer.domElement);
 
         // --- Lighting ---
-        const sunLight = new THREE.DirectionalLight(0xffffff, 1);
-        sunLight.position.set(5, 10, 5);
+        const sunLight = new THREE.DirectionalLight(0xffffff, 1.0);
         scene.add(sunLight);
+        const ambient = new THREE.AmbientLight(0x404040, 0.5);
+        scene.add(ambient);
 
-        const flashlight = new THREE.SpotLight(0xffffff, 0); // Start off
-        flashlight.angle = Math.PI / 6;
-        flashlight.penumbra = 0.3;
+        const flashlight = new THREE.SpotLight(0xffffff, 0, 40, Math.PI/6, 0.5);
         scene.add(flashlight);
         scene.add(flashlight.target);
 
-        // --- The World ---
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshStandardMaterial({ color: 0x228b22 }));
+        // --- World (Dark Forest/Yard) ---
+        const floor = new THREE.Mesh(
+            new THREE.PlaneGeometry(200, 200), 
+            new THREE.MeshStandardMaterial({ color: 0x111111 })
+        );
         floor.rotation.x = -Math.PI / 2;
         scene.add(floor);
 
-        // --- The Neighbor ---
-        const neighborGeometry = new THREE.BoxGeometry(1, 2, 1);
-        const neighborMaterial = new THREE.MeshStandardMaterial({ color: 0x0000ff });
-        const neighbor = new THREE.Mesh(neighborGeometry, neighborMaterial);
-        neighbor.position.set(10, 1, 10);
-        scene.add(neighbor);
+        // --- The Guest (The Neighbor) ---
+        const guestGroup = new THREE.Group();
+        const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.5, 1.5, 4, 8), new THREE.MeshStandardMaterial({color: 0x222222}));
+        guestGroup.add(body);
+        guestGroup.position.set(20, 1.25, 20);
+        scene.add(guestGroup);
 
-        // --- State Variables ---
+        // --- Game Logic Variables ---
         let isNight = false;
         let flashlightOn = false;
+        let battery = 100;
         let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
-        const playerPos = new THREE.Vector3(0, 1.7, 0);
+        let yaw = 0, pitch = 0;
         
+        // --- Interaction & Fullscreen ---
+        const overlay = document.getElementById('overlay');
+        overlay.addEventListener('click', () => {
+            overlay.style.display = 'none';
+            document.body.requestPointerLock();
+            document.documentElement.requestFullscreen();
+        });
+
         // --- Controls ---
-        document.addEventListener('click', () => document.body.requestPointerLock());
         document.addEventListener('keydown', (e) => {
-            if (e.code === 'KeyW') moveForward = true;
-            if (e.code === 'KeyS') moveBackward = true;
-            if (e.code === 'KeyA') moveLeft = true;
-            if (e.code === 'KeyD') moveRight = true;
-            if (e.code === 'KeyF') {
-                flashlightOn = !flashlightOn;
-                flashlight.intensity = flashlightOn ? 50 : 0;
-            }
+            if(e.code === 'KeyW') moveForward = true;
+            if(e.code === 'KeyS') moveBackward = true;
+            if(e.code === 'KeyA') moveLeft = true;
+            if(e.code === 'KeyD') moveRight = true;
+            if(e.code === 'KeyF' && battery > 0) toggleFlashlight();
         });
         document.addEventListener('keyup', (e) => {
-            if (e.code === 'KeyW') moveForward = false;
-            if (e.code === 'KeyS') moveBackward = false;
-            if (e.code === 'KeyA') moveLeft = false;
-            if (e.code === 'KeyD') moveRight = false;
+            if(e.code === 'KeyW') moveForward = false;
+            if(e.code === 'KeyS') moveBackward = false;
+            if(e.code === 'KeyA') moveLeft = false;
+            if(e.code === 'KeyD') moveRight = false;
         });
-
         document.addEventListener('mousemove', (e) => {
             if (document.pointerLockElement) {
-                camera.rotation.y -= e.movementX * 0.002;
-                camera.rotation.x -= e.movementY * 0.002;
+                yaw -= e.movementX * 0.002;
+                pitch -= e.movementY * 0.002;
+                pitch = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, pitch));
             }
         });
 
-        // --- Day/Night Cycle Logic ---
+        function toggleFlashlight() {
+            flashlightOn = !flashlightOn;
+            flashlight.intensity = flashlightOn ? 100 : 0;
+        }
+
+        // --- Day/Night Timer (Now 30 seconds per cycle) ---
         setInterval(() => {
             isNight = !isNight;
-            document.getElementById('time-status').innerText = isNight ? "NIGHT" : "DAY";
+            const display = document.getElementById('time-display');
+            display.innerText = isNight ? "TIME: NIGHT" : "TIME: DAY";
+            display.style.color = isNight ? "#ff0000" : "#ffffff";
             
             if (isNight) {
-                scene.background = new THREE.Color(0x000005);
-                sunLight.intensity = 0.05;
-                neighbor.material.color.set(0x000000); // Turns black
-                neighbor.scale.set(2, 4, 2); // Gets HUGE (The Crowd)
+                scene.background = new THREE.Color(0x000000);
+                sunLight.intensity = 0;
+                guestGroup.scale.set(1.5, 3, 1.5); // He grows into a giant crowd/shadow
             } else {
-                scene.background = new THREE.Color(0x87ceeb);
-                sunLight.intensity = 1;
-                neighbor.material.color.set(0x0000ff); // Regular neighbor
-                neighbor.scale.set(1, 1, 1);
+                scene.background = new THREE.Color(0x445566);
+                sunLight.intensity = 1.0;
+                guestGroup.scale.set(1, 1, 1);
             }
-        }, 10000); // Swaps every 10 seconds
+        }, 30000); 
 
-        // --- Game Loop ---
+        // --- Animation Loop ---
         function animate() {
             requestAnimationFrame(animate);
 
-            // Move Player
-            if (moveForward) camera.translateZ(-0.1);
-            if (moveBackward) camera.translateZ(0.1);
-            if (moveLeft) camera.translateX(-0.1);
-            if (moveRight) camera.translateX(0.1);
-            camera.position.y = 1.7; // Keep eye level
+            // Movement logic
+            const moveSpeed = 0.15;
+            const direction = new THREE.Vector3();
+            if (moveForward) direction.z -= 1;
+            if (moveBackward) direction.z += 1;
+            if (moveLeft) direction.x -= 1;
+            if (moveRight) direction.x += 1;
+            
+            camera.rotation.order = "YXZ";
+            camera.rotation.set(pitch, yaw, 0);
+            camera.translateOnAxis(direction.normalize(), moveSpeed);
+            camera.position.y = 1.7; // Player height
 
-            // Update Flashlight
+            // Flashlight tracking
             flashlight.position.copy(camera.position);
-            const targetPos = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).add(camera.position);
-            flashlight.target.position.copy(targetPos);
+            const targetDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+            flashlight.target.position.copy(camera.position).add(targetDir);
 
-            // Neighbor AI
-            const speed = isNight ? 0.08 : 0.02;
-            const direction = new THREE.Vector3().subVectors(camera.position, neighbor.position).normalize();
-            neighbor.position.x += direction.x * speed;
-            neighbor.position.z += direction.z * speed;
+            // Battery drain
+            if (flashlightOn) {
+                battery -= 0.05;
+                if (battery <= 0) {
+                    battery = 0;
+                    flashlightOn = false;
+                    flashlight.intensity = 0;
+                }
+                document.getElementById('battery-fill').style.width = battery + "%";
+            }
+
+            // AI Logic (Hello Guest style)
+            const dist = guestGroup.position.distanceTo(camera.position);
+            if (isNight) {
+                // At night, he chases you aggressively
+                const chaseDir = new THREE.Vector3().subVectors(camera.position, guestGroup.position).normalize();
+                guestGroup.position.add(chaseDir.multiplyScalar(0.12));
+                
+                // If he gets close, he makes a "scratching" vibration (visual shake)
+                if (dist < 5) {
+                    camera.position.x += (Math.random() - 0.5) * 0.1;
+                }
+                
+                if (dist < 1.5) {
+                    alert("THE GUEST CAUGHT YOU");
+                    location.reload();
+                }
+            } else {
+                // In the day, he just wanders or stands still like a regular person
+                guestGroup.position.x += Math.sin(Date.now() * 0.001) * 0.02;
+            }
 
             renderer.render(scene, camera);
         }
