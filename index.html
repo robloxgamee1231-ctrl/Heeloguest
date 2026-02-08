@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>The Neighbor's Shadow</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        #ui { position: absolute; top: 10px; left: 10px; color: white; pointer-events: none; }
+        #instructions { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; text-align: center; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h2>Day/Night: <span id="time-status">Day</span></h2>
+        <p>Flashlight: F | Move: WASD</p>
+    </div>
+    <div id="instructions"><h1>Click to Start</h1></div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- Setup Scene ---
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // --- Lighting ---
+        const sunLight = new THREE.DirectionalLight(0xffffff, 1);
+        sunLight.position.set(5, 10, 5);
+        scene.add(sunLight);
+
+        const flashlight = new THREE.SpotLight(0xffffff, 0); // Start off
+        flashlight.angle = Math.PI / 6;
+        flashlight.penumbra = 0.3;
+        scene.add(flashlight);
+        scene.add(flashlight.target);
+
+        // --- The World ---
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshStandardMaterial({ color: 0x228b22 }));
+        floor.rotation.x = -Math.PI / 2;
+        scene.add(floor);
+
+        // --- The Neighbor ---
+        const neighborGeometry = new THREE.BoxGeometry(1, 2, 1);
+        const neighborMaterial = new THREE.MeshStandardMaterial({ color: 0x0000ff });
+        const neighbor = new THREE.Mesh(neighborGeometry, neighborMaterial);
+        neighbor.position.set(10, 1, 10);
+        scene.add(neighbor);
+
+        // --- State Variables ---
+        let isNight = false;
+        let flashlightOn = false;
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+        const playerPos = new THREE.Vector3(0, 1.7, 0);
+        
+        // --- Controls ---
+        document.addEventListener('click', () => document.body.requestPointerLock());
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'KeyW') moveForward = true;
+            if (e.code === 'KeyS') moveBackward = true;
+            if (e.code === 'KeyA') moveLeft = true;
+            if (e.code === 'KeyD') moveRight = true;
+            if (e.code === 'KeyF') {
+                flashlightOn = !flashlightOn;
+                flashlight.intensity = flashlightOn ? 50 : 0;
+            }
+        });
+        document.addEventListener('keyup', (e) => {
+            if (e.code === 'KeyW') moveForward = false;
+            if (e.code === 'KeyS') moveBackward = false;
+            if (e.code === 'KeyA') moveLeft = false;
+            if (e.code === 'KeyD') moveRight = false;
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (document.pointerLockElement) {
+                camera.rotation.y -= e.movementX * 0.002;
+                camera.rotation.x -= e.movementY * 0.002;
+            }
+        });
+
+        // --- Day/Night Cycle Logic ---
+        setInterval(() => {
+            isNight = !isNight;
+            document.getElementById('time-status').innerText = isNight ? "NIGHT" : "DAY";
+            
+            if (isNight) {
+                scene.background = new THREE.Color(0x000005);
+                sunLight.intensity = 0.05;
+                neighbor.material.color.set(0x000000); // Turns black
+                neighbor.scale.set(2, 4, 2); // Gets HUGE (The Crowd)
+            } else {
+                scene.background = new THREE.Color(0x87ceeb);
+                sunLight.intensity = 1;
+                neighbor.material.color.set(0x0000ff); // Regular neighbor
+                neighbor.scale.set(1, 1, 1);
+            }
+        }, 10000); // Swaps every 10 seconds
+
+        // --- Game Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Move Player
+            if (moveForward) camera.translateZ(-0.1);
+            if (moveBackward) camera.translateZ(0.1);
+            if (moveLeft) camera.translateX(-0.1);
+            if (moveRight) camera.translateX(0.1);
+            camera.position.y = 1.7; // Keep eye level
+
+            // Update Flashlight
+            flashlight.position.copy(camera.position);
+            const targetPos = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).add(camera.position);
+            flashlight.target.position.copy(targetPos);
+
+            // Neighbor AI
+            const speed = isNight ? 0.08 : 0.02;
+            const direction = new THREE.Vector3().subVectors(camera.position, neighbor.position).normalize();
+            neighbor.position.x += direction.x * speed;
+            neighbor.position.z += direction.z * speed;
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
